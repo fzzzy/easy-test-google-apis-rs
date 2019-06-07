@@ -1,20 +1,107 @@
+extern crate diesel;
 extern crate google_spanner1 as spanner1;
 extern crate hyper;
 extern crate hyper_rustls;
 extern crate yup_oauth2 as oauth2;
-use oauth2::ServiceAccountAccess;
-use spanner1::Spanner;
+use diesel::r2d2;
+use oauth2::{GetToken, ServiceAccountAccess};
 use spanner1::Error;
+use spanner1::Spanner;
+use spanner1::Hub;
+use std::borrow::BorrowMut;
 use yup_oauth2::service_account_key_from_file;
 
+use futures::future;
 use futures::future::lazy;
 use futures::future::Future;
-use futures::future;
 use tokio_threadpool::ThreadPool;
 
 const DATABASE_INSTANCE: &'static str = "projects/lustrous-center-242019/instances/testing1";
 
+/*
+pub struct SpannerConnectionManager<C, A>
+where
+    C: BorrowMut<hyper::Client>,
+    A: GetToken,
+;
+
+impl<C, A> r2d2::ManageConnection for SpannerConnectionManager<C, A>
+where
+    C: BorrowMut<hyper::Client>,
+    A: GetToken,
+{
+    type Connection = Spanner<C, A>;
+*/
+//use std::marker::PhantomData;
+
+//pub struct SpannerConnectionManager;
+/*
+#[derive(Debug, Clone)]
+pub struct SpannerConnectionManager<T> {
+    _marker: PhantomData<T>,
+}
+*/
+
+pub struct SpannerConnectionManager;
+//pub struct SpannerConnectionManager<C> where
+//pub struct SpannerConnectionManager<C> where
+//    C: Sync + Send + 'static {
+//C: oauth2::GetToken + Sync + Send + 'static {
+//    access: C,
+//    _marker: PhantomData<C>,
+//}
+//unsafe impl<C: Send + 'static> Sync for SpannerConnectionManager<C> {}
+
+
+/*
+impl<T> r2d2::ManageConnection for SpannerConnectionManager<T>
+//impl r2d2::ManageConnection for SpannerConnectionManager
+where
+    T: Hub + Send + 'static,
+
+{
+*/
+//impl<C> r2d2::ManageConnection for SpannerConnectionManager<C>
+//where
+impl r2d2::ManageConnection for SpannerConnectionManager
+//C: Sync + Send + 'static {
+//C: oauth2::GetToken + Sync + Send + 'static {
+    {
+    type Connection = Spanner<hyper::Client, ServiceAccountAccess<hyper::Client>>;
+    type Error = Error;
+
+    fn connect(&self) -> Result<Self::Connection, Error> {
+        let secret = service_account_key_from_file(&String::from("service-account.json")).unwrap();
+        let client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
+            hyper_rustls::TlsClient::new(),
+        ));
+        let mut access = ServiceAccountAccess::new(secret, client);
+        use yup_oauth2::GetToken;
+        println!(
+            "{:?}",
+            access
+                .token(&vec!["https://www.googleapis.com/auth/spanner.data"])
+                .unwrap()
+        );
+        let client2 = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
+            hyper_rustls::TlsClient::new(),
+        ));
+        Ok(Spanner::new(client2, access))
+    }
+
+    fn is_valid(&self, conn: &mut Self::Connection) -> Result<(), Error> {
+        //conn.query("SELECT version()").map(|_| ())
+        Ok(())
+    }
+
+    fn has_broken(&self, conn: &mut Self::Connection) -> bool {
+        //self.is_valid(conn).is_err()
+        false
+    }
+}
+
 fn do_a_blocking_thing() -> Box<Future<Item = usize, Error = ()> + Send> {
+    /*
     let secret = service_account_key_from_file(&String::from("service-account.json")).unwrap();
     let client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
         hyper_rustls::TlsClient::new(),
@@ -31,6 +118,11 @@ fn do_a_blocking_thing() -> Box<Future<Item = usize, Error = ()> + Send> {
         hyper_rustls::TlsClient::new(),
     ));
     let hub = Spanner::new(client2, access);
+     */
+    let m = SpannerConnectionManager {};
+    let pool = r2d2::Pool::builder().build(m).unwrap();
+    let hub = pool.get().unwrap();
+
     let result = hub
         .projects()
         .instances_databases_list(DATABASE_INSTANCE)
@@ -75,5 +167,4 @@ fn main() {
     }));
     println!("hello world");
     println!("future result {}", fut.wait().unwrap());
-
 }
