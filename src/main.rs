@@ -4,11 +4,9 @@ extern crate hyper;
 extern crate hyper_rustls;
 extern crate yup_oauth2 as oauth2;
 use diesel::r2d2;
-use oauth2::{GetToken, ServiceAccountAccess};
+use oauth2::{ServiceAccountAccess};
 use spanner1::Error;
 use spanner1::Spanner;
-use spanner1::Hub;
-use std::borrow::BorrowMut;
 use yup_oauth2::service_account_key_from_file;
 
 use futures::future;
@@ -31,25 +29,21 @@ impl r2d2::ManageConnection for SpannerConnectionManager {
         ));
         let mut access = ServiceAccountAccess::new(secret, client);
         use yup_oauth2::GetToken;
-        println!(
-            "{:?}",
-            access
+        let _token = access
                 .token(&vec!["https://www.googleapis.com/auth/spanner.data"])
-                .unwrap()
-        );
+                .unwrap();
+        // println!("{:?}", token);
         let client2 = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
             hyper_rustls::TlsClient::new(),
         ));
         Ok(Spanner::new(client2, access))
     }
 
-    fn is_valid(&self, conn: &mut Self::Connection) -> Result<(), Error> {
-        //conn.query("SELECT version()").map(|_| ())
+    fn is_valid(&self, _conn: &mut Self::Connection) -> Result<(), Error> {
         Ok(())
     }
 
-    fn has_broken(&self, conn: &mut Self::Connection) -> bool {
-        //self.is_valid(conn).is_err()
+    fn has_broken(&self, _conn: &mut Self::Connection) -> bool {
         false
     }
 }
