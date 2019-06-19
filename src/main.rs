@@ -1,36 +1,58 @@
+extern crate diesel;
 extern crate google_spanner1 as spanner1;
 extern crate hyper;
 extern crate hyper_rustls;
 extern crate yup_oauth2 as oauth2;
-use oauth2::ServiceAccountAccess;
-use spanner1::Spanner;
+use diesel::r2d2;
+use oauth2::{ServiceAccountAccess};
 use spanner1::Error;
+use spanner1::Spanner;
 use yup_oauth2::service_account_key_from_file;
 
+use futures::future;
 use futures::future::lazy;
 use futures::future::Future;
-use futures::future;
 use tokio_threadpool::ThreadPool;
 
 const DATABASE_INSTANCE: &'static str = "projects/lustrous-center-242019/instances/testing1";
 
+pub struct SpannerConnectionManager;
+
+impl r2d2::ManageConnection for SpannerConnectionManager {
+    type Connection = Spanner<hyper::Client, ServiceAccountAccess<hyper::Client>>;
+    type Error = Error;
+
+    fn connect(&self) -> Result<Self::Connection, Error> {
+        let secret = service_account_key_from_file(&String::from("service-account.json")).unwrap();
+        let client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
+            hyper_rustls::TlsClient::new(),
+        ));
+        let mut access = ServiceAccountAccess::new(secret, client);
+        use yup_oauth2::GetToken;
+        let _token = access
+                .token(&vec!["https://www.googleapis.com/auth/spanner.data"])
+                .unwrap();
+        // println!("{:?}", token);
+        let client2 = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
+            hyper_rustls::TlsClient::new(),
+        ));
+        Ok(Spanner::new(client2, access))
+    }
+
+    fn is_valid(&self, _conn: &mut Self::Connection) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn has_broken(&self, _conn: &mut Self::Connection) -> bool {
+        false
+    }
+}
+
 fn do_a_blocking_thing() -> Box<Future<Item = usize, Error = ()> + Send> {
-    let secret = service_account_key_from_file(&String::from("service-account.json")).unwrap();
-    let client = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
-        hyper_rustls::TlsClient::new(),
-    ));
-    let mut access = ServiceAccountAccess::new(secret, client);
-    use yup_oauth2::GetToken;
-    println!(
-        "{:?}",
-        access
-            .token(&vec!["https://www.googleapis.com/auth/spanner.data"])
-            .unwrap()
-    );
-    let client2 = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
-        hyper_rustls::TlsClient::new(),
-    ));
-    let hub = Spanner::new(client2, access);
+    let m = SpannerConnectionManager {};
+    let pool = r2d2::Pool::builder().build(m).unwrap();
+    let hub = pool.get().unwrap();
+
     let result = hub
         .projects()
         .instances_databases_list(DATABASE_INSTANCE)
@@ -75,5 +97,4 @@ fn main() {
     }));
     println!("hello world");
     println!("future result {}", fut.wait().unwrap());
-
 }

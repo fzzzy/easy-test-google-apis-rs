@@ -5,6 +5,7 @@ authors = ["Donovan Preston <donovanpreston@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+diesel = { version = "1.4.2", features = ["mysql", "r2d2"] }
 google-spanner1 = "*"
 # This project intentionally uses an old version of Hyper. See
 # https://github.com/Byron/google-apis-rs/issues/173 for more
