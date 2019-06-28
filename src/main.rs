@@ -3,10 +3,15 @@ extern crate google_spanner1 as spanner1;
 extern crate hyper;
 extern crate hyper_rustls;
 extern crate yup_oauth2 as oauth2;
+
 use diesel::r2d2;
 use oauth2::ServiceAccountAccess;
+use spanner1::CreateSessionRequest;
 use spanner1::Error;
+use spanner1::ExecuteSqlRequest;
+use spanner1::Session;
 use spanner1::Spanner;
+
 use yup_oauth2::service_account_key_from_file;
 
 use futures::future;
@@ -14,12 +19,18 @@ use futures::future::lazy;
 use futures::future::Future;
 use tokio_threadpool::ThreadPool;
 
-const DATABASE_INSTANCE: &'static str = "projects/sync-spanner-dev-225401/instances/spanner-test";
+const DATABASE_NAME: &'static str =
+    "projects/sync-spanner-dev-225401/instances/spanner-test/databases/sync";
 
 pub struct SpannerConnectionManager;
 
+pub struct SpannerSession {
+    hub: Spanner<hyper::Client, ServiceAccountAccess<hyper::Client>>,
+    session: Session,
+}
+
 impl r2d2::ManageConnection for SpannerConnectionManager {
-    type Connection = Spanner<hyper::Client, ServiceAccountAccess<hyper::Client>>;
+    type Connection = SpannerSession;
     type Error = Error;
 
     fn connect(&self) -> Result<Self::Connection, Error> {
@@ -36,7 +47,15 @@ impl r2d2::ManageConnection for SpannerConnectionManager {
         let client2 = hyper::Client::with_connector(hyper::net::HttpsConnector::new(
             hyper_rustls::TlsClient::new(),
         ));
-        Ok(Spanner::new(client2, access))
+        let hub = Spanner::new(client2, access);
+        let req = CreateSessionRequest::default();
+        let session = hub
+            .projects()
+            .instances_databases_sessions_create(req, DATABASE_NAME)
+            .doit()
+            .unwrap()
+            .1;
+        Ok(SpannerSession { hub, session })
     }
 
     fn is_valid(&self, _conn: &mut Self::Connection) -> Result<(), Error> {
@@ -51,11 +70,14 @@ impl r2d2::ManageConnection for SpannerConnectionManager {
 fn do_a_blocking_thing() -> Box<Future<Item = usize, Error = ()> + Send> {
     let m = SpannerConnectionManager {};
     let pool = r2d2::Pool::builder().build(m).unwrap();
-    let hub = pool.get().unwrap();
-
-    let result = hub
+    let spanner = pool.get().unwrap();
+    let mut sql = ExecuteSqlRequest::default();
+    sql.sql = Some("select count(*) from user_collections;".to_string());
+    let session = spanner.session.clone().name.unwrap();
+    let result = spanner
+        .hub
         .projects()
-        .instances_databases_list(DATABASE_INSTANCE)
+        .instances_databases_sessions_execute_sql(sql, &session)
         .doit();
 
     let rv = match result {
@@ -75,16 +97,10 @@ fn do_a_blocking_thing() -> Box<Future<Item = usize, Error = ()> + Send> {
                 Box::new(future::err(()))
             }
         },
-        Ok(res) => match res.1.databases {
-            Some(dbs) => {
-                println!("{:?}", dbs);
-                Box::new(future::ok(dbs.len()))
-            }
-            None => {
-                println!("no databases");
-                Box::new(future::err(()))
-            }
-        },
+        Ok(res) => {
+            println!("{:?}", res.1);
+            Box::new(future::ok(42))
+        }
     };
     rv
 }
