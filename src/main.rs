@@ -73,11 +73,11 @@ fn do_a_blocking_thing() -> Box<Future<Item = usize, Error = ()> + Send> {
     let spanner = pool.get().unwrap();
     let mut sql = ExecuteSqlRequest::default();
     sql.sql = Some("select count(*) from user_collections;".to_string());
-    let session = spanner.session.clone().name.unwrap();
+    let session = spanner.session.name.as_ref().unwrap();
     let result = spanner
         .hub
         .projects()
-        .instances_databases_sessions_execute_sql(sql, &session)
+        .instances_databases_sessions_execute_sql(sql, session)
         .doit();
 
     let rv = match result {
