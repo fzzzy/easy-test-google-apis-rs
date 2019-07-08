@@ -4,6 +4,8 @@ extern crate hyper;
 extern crate hyper_rustls;
 extern crate yup_oauth2 as oauth2;
 
+use std::collections::HashMap;
+
 use diesel::r2d2;
 use oauth2::ServiceAccountAccess;
 use spanner1::CreateSessionRequest;
@@ -67,12 +69,16 @@ impl r2d2::ManageConnection for SpannerConnectionManager {
     }
 }
 
-fn do_a_blocking_thing() -> Box<Future<Item = usize, Error = ()> + Send> {
+fn do_a_blocking_thing() -> Box<Future<Item = String, Error = ()> + Send> {
     let m = SpannerConnectionManager {};
     let pool = r2d2::Pool::builder().build(m).unwrap();
     let spanner = pool.get().unwrap();
     let mut sql = ExecuteSqlRequest::default();
-    sql.sql = Some("select count(*) from user_collections;".to_string());
+    sql.sql =
+        Some("select count(*) from user_collections where collection=@collection;".to_string());
+    let mut params = HashMap::new();
+    params.insert("collection".to_string(), "1".to_string());
+    sql.params = Some(params);
     let session = spanner.session.name.as_ref().unwrap();
     let result = spanner
         .hub
@@ -99,7 +105,10 @@ fn do_a_blocking_thing() -> Box<Future<Item = usize, Error = ()> + Send> {
         },
         Ok(res) => {
             println!("{:?}", res.1);
-            Box::new(future::ok(42))
+            match res.1.rows {
+                Some(r) => Box::new(future::ok(r[0][0].clone())),
+                None => Box::new(future::ok("0".to_string())),
+            }
         }
     };
     rv
